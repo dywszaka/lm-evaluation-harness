@@ -21,7 +21,7 @@ def get_result(logprobs, context_length):
     idx = 0
     while offsets[idx] < context_length:
         idx += 1
-    continuation_logprobs = sum(tokens_logprobs[idx:-1])
+    continuation_logprobs = sum(tokens_logprobs[idx:])
     for i in range(idx, len(tokens)):
         token = tokens[i]
         top_tokens = logprobs["top_logprobs"][i]
