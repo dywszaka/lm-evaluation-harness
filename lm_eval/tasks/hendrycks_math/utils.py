@@ -1,6 +1,226 @@
 from typing import Dict, List
+import logging
+
+import multiprocessing
+import numpy as np
+import regex
+from sympy import simplify, N
+from sympy.parsing.latex import parse_latex
+from sympy.parsing.sympy_parser import parse_expr
+from typing import Union
+from math import isclose
 
 import datasets
+
+eval_logger = logging.getLogger(__name__)
+
+def parse_digits(num):
+    # format: 234.23 || 23%
+    num = regex.sub(',', '', str(num))
+    try:
+        return float(num)
+    except:
+        if num.endswith('%'):
+            num = num[:-1]
+            if num.endswith('\\'):
+                num = num[:-1]
+            try:
+                return float(num) / 100
+            except:
+                pass
+    return None
+
+def is_digit(num):
+    # paired with parse_digits
+    return parse_digits(num) is not None
+
+def normalize_prediction(prediction):
+    try: # 1. numerical equal
+        if is_digit(prediction):
+            prediction = np.round(float(str(prediction).replace(",", "")), 6)
+        return str(prediction)
+    except:
+        pass
+
+    # 2. symbolic equal
+    prediction = str(prediction).strip()
+
+    ## deal with [], (), {}
+    brackets = []
+    while prediction.startswith("[") and prediction.endswith("]") or (prediction.startswith("(") and prediction.endswith(")")):
+        bracket = prediction[0]
+        prediction = prediction[1:-1]
+    if brackets and ',' in prediction:
+        pred_parts = [normalize_prediction(part) for part in prediction.split(",")]
+        prediction = ",".join(pred_parts)
+
+    if brackets:
+        for b in reversed(brackets):
+            if b == '[':
+                prediction = '[' + prediction + ']'
+            else:
+                assert b == '('
+                prediction = '(' + prediction + ')'
+
+    def _parse(s):
+        for f in [parse_latex, parse_expr]:
+            try:
+                return f(s)
+            except:
+                pass
+        return s
+
+    prediction = _parse(prediction)
+
+    for s in ['{', "}", "(", ")"]:
+        prediction = prediction.replace(s, "")
+
+    return prediction
+
+
+def math_equal(prediction: Union[bool, float, str],
+                reference: Union[float, str],
+                include_percentage: bool = True,
+                is_close: bool = True,
+                timeout: bool = False,
+                ) -> bool:
+    """
+    Exact match of math if and only if:
+    1. numerical equal: both can convert to float and are equal
+    2. symbolic equal: both can convert to sympy expression and are equal
+    """
+    if str(prediction) == str(reference):
+        return True
+
+    try: # 1. numerical equal
+        if is_digit(prediction) and is_digit(reference):
+            prediction = parse_digits(prediction)
+            reference = parse_digits(reference)
+            # number questions
+            if include_percentage:
+                gt_result = [reference / 100, reference, reference * 100]
+            else:
+                gt_result = [reference]
+            for item in gt_result:
+                try:
+                    if is_close:
+                        if isclose(item, prediction, abs_tol=1e-3):
+                            return True
+                    else:
+                        if item == prediction:
+                            return True
+                except Exception:
+                    continue
+            return False
+    except:
+        pass
+
+    if not prediction and prediction not in [0, False]:
+        return False
+
+    # 2. symbolic equal
+    reference = str(reference).strip()
+    prediction = str(prediction).strip()
+
+    if regex.match(r'(\(|\[).+(\)|\])', prediction) is not None and regex.match(r'(\(|\[).+(\)|\])', reference) is not None:
+        pred_parts = prediction[1:-1].split(",")
+        ref_parts = reference[1:-1].split(",")
+        if len(pred_parts) == len(ref_parts):
+            if all([math_equal(pred_parts[i], ref_parts[i], include_percentage, is_close) for i in range(len(pred_parts))]):
+                return True
+
+    if (prediction.startswith("\\begin{pmatrix}") or prediction.startswith("\\begin{bmatrix}")) and (prediction.endswith("\\end{pmatrix}") or prediction.endswith("\\end{bmatrix}")) and \
+        (reference.startswith("\\begin{pmatrix}") or reference.startswith("\\begin{bmatrix}")) and (reference.endswith("\\end{pmatrix}") or reference.endswith("\\end{bmatrix}")):
+        pred_lines = [line.strip() for line in prediction[len("\\begin{pmatrix}"): -len("\\end{pmatrix}")].split("\\\\") if line.strip()]
+        ref_lines = [line.strip() for line in reference[len("\\begin{pmatrix}"): -len("\\end{pmatrix}")].split("\\\\") if line.strip()]
+        matched = True
+        if len(pred_lines) == len(ref_lines):
+            for pred_line, ref_line in zip(pred_lines, ref_lines):
+                pred_parts = pred_line.split("&")
+                ref_parts = ref_line.split("&")
+                if len(pred_parts) == len(ref_parts):
+                    if not all([math_equal(pred_parts[i], ref_parts[i], include_percentage, is_close) for i in range(len(pred_parts))]):
+                        matched = False
+                        break
+                else:
+                    matched = False
+                if not matched:
+                    break
+        else:
+            matched = False
+        if matched:
+            return True
+
+    if prediction.count('=') == 1 and reference.count('=') == 1:
+        pred = prediction.split('=')
+        pred = f"{pred[0].strip()} - ({pred[1].strip()})"
+        ref = reference.split('=')
+        ref = f"{ref[0].strip()} - ({ref[1].strip()})"
+        if symbolic_equal(pred, ref) or symbolic_equal(f"-({pred})", ref):
+            return True
+    elif prediction.count('=') == 1 and len(prediction.split('=')[0].strip()) <= 2 and '=' not in reference:
+        if math_equal(prediction.split('=')[1], reference, include_percentage, is_close):
+            return True
+    elif reference.count('=') == 1 and len(reference.split('=')[0].strip()) <= 2 and '=' not in prediction:
+        if math_equal(prediction, reference.split('=')[1], include_percentage, is_close):
+            return True
+
+    # symbolic equal with sympy
+    if timeout:
+        if call_with_timeout(symbolic_equal_process, prediction, reference):
+            return True
+    else:
+        if symbolic_equal(prediction, reference):
+            return True
+
+    return False
+
+
+def math_equal_process(param):
+    return math_equal(param[-2], param[-1])
+
+
+def symbolic_equal(a, b):
+    def _parse(s):
+        for f in [parse_latex, parse_expr]:
+            try:
+                return f(s)
+            except:
+                pass
+        return s
+    a = _parse(a)
+    b = _parse(b)
+
+    try:
+        if simplify(a-b) == 0:
+            return True
+    except:
+        pass
+
+    try:
+        if isclose(N(a), N(b), abs_tol=1e-3):
+            return True
+    except:
+        pass
+    return False
+
+def symbolic_equal_process(a, b, output_queue):  
+    result = symbolic_equal(a, b)
+    output_queue.put(result)  
+
+def call_with_timeout(func, *args, timeout=1, **kwargs):  
+    output_queue = multiprocessing.Queue()  
+    process_args = args + (output_queue,)  
+    process = multiprocessing.Process(target=func, args=process_args, kwargs=kwargs)  
+    process.start()  
+    process.join(timeout)  
+  
+    if process.is_alive():  
+        process.terminate()
+        process.join()  
+        return False  
+  
+    return output_queue.get()
 
 
 def process_docs(dataset: datasets.Dataset) -> datasets.Dataset:
@@ -25,6 +245,28 @@ def process_results(doc: dict, results: List[str]) -> Dict[str, int]:
 
     if is_equiv(answer, remove_boxed(last_boxed_only_string(doc["solution"]))):
         retval = 1
+
+    results = {
+        "exact_match": retval,
+    }
+    return results
+
+def process_cot_results(doc: dict, results: List[str]) -> Dict[str, int]:
+    retval = 0
+    answer = last_boxed_only_string(results[0])
+    if answer is not None:
+        answer = remove_boxed(answer)
+    else:
+        eval_logger.debug(f"Warning: No boxed answer found")
+    expected = remove_boxed(last_boxed_only_string(doc["solution"]))
+
+    if is_equiv(answer, expected):
+        retval = 1
+
+    if retval == 0 and math_equal(answer, expected):
+        eval_logger.debug(f"Math equal success: pred={answer}, expected={expected}")
+        retval = 1
+        
 
     results = {
         "exact_match": retval,
@@ -58,7 +300,10 @@ def remove_boxed(s):
 
     left = "\\boxed{"
 
-    assert s[: len(left)] == left
+    if s[: len(left)] != left:
+        eval_logger.debug(f"Warning: String does not start with {left}, s={s}")
+        return None
+    # assert s[: len(left)] == left
     assert s[-1] == "}"
 
     return s[len(left) : -1]

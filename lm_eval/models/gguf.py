@@ -44,16 +44,21 @@ class GGUFLM(LM):
         self.max_length = max_length
 
     def gguf_completion(
-        self, context, continuation=None, stop=None, retries=3, delay=5, **kwargs
+        self, context, continuation=None, request_args=None, retries=3, delay=5, logprobs=None, **kwargs
     ):
+        stop = request_args.get("until", ["</s>"]) if request_args else None
+        max_tokens = request_args.get("max_gen_toks", 128) if request_args else None
         for _ in range(retries):
             try:
                 prompt = context
                 request = {
                     "prompt": prompt,
-                    "logprobs": self.logprobs,
                     "temperature": self.temperature,
                 }
+                if logprobs is not None:
+                    request.update({"logprobs": logprobs})
+                if max_tokens is not None:
+                    request.update({"max_tokens": max_tokens})
                 if continuation:
                     prompt += continuation
                     request.update({"prompt": prompt, "max_tokens": 1, "echo": True})
@@ -79,7 +84,7 @@ class GGUFLM(LM):
         for context, continuation in tqdm(
             [req.args for req in requests], disable=disable_tqdm
         ):
-            response = self.gguf_completion(context=context, continuation=continuation)
+            response = self.gguf_completion(context=context, continuation=continuation, logprobs=self.logprobs)
             if response and "choices" in response and response["choices"]:
                 choice = response["choices"][0]
                 logprobs = choice.get("logprobs")
@@ -109,8 +114,7 @@ class GGUFLM(LM):
         for request in tqdm([req.args for req in requests], disable=disable_tqdm):
             inp = request[0]
             request_args = request[1]
-            until = request_args.get("until", ["</s>"])
-            response = self.gguf_completion(context=inp, stop=until)
+            response = self.gguf_completion(context=inp, request_args=request_args)
             if response and "choices" in response and response["choices"]:
                 choice = response["choices"][0]
                 if "text" in choice:
