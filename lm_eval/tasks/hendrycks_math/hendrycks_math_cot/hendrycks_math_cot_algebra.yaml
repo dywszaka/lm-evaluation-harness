@@ -1,0 +1,32 @@
+tag:
+  - math_word_problems
+  - chain_of_thought
+task: hendrycks_math_cot_algebra
+dataset_path: EleutherAI/hendrycks_math
+process_docs: !function ../utils.process_docs
+dataset_name: algebra
+output_type: generate_until
+training_split: train
+test_split: test
+fewshot_split: train
+num_fewshot: 4
+description: |
+  Please reason step by step, and put your final answer within \boxed{}
+  
+doc_to_text: "Problem: {{problem}}\nAnswer:"
+doc_to_target: "{{solution}}"
+process_results: !function ../utils.process_cot_results
+generation_kwargs:
+  until:
+    - "Problem:"
+    - </s>
+    - <|im_end|>
+  do_sample: false
+  temperature: 0
+  max_gen_toks: 1024
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
+metadata:
+  version: 1.0

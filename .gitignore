@@ -30,18 +30,86 @@ output/
 data/
 temp/
 test_logs/
+eval_out/
+eval_results/
+eval_cache/
+results/
 
 # Caching
 lm_eval/caching/.cache
 lm_cache/
+*.cache
+.cache/
+__pycache__/
+.pytest_cache/
+
+# Temporary and backup files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.swp
+*.swo
+*~
+.#*
+#*#
+
+# Pickle and serialized data
+*.pickle
+*.pkl
+*.p
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Compressed files
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# Model files and weights (often large)
+*.bin
+*.pt
+*.pth
+*.onnx
+*.h5
+*.safetensors
 
 # Logging
 *.log
+*.log.*
 logs/
 
 # wandb experiment tracking
 wandb/
 examples/wandb/
 
+# Test coverage
+.coverage
+htmlcov/
+.tox/
+coverage.xml
+*.cover
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
 # PyInstaller
 *.spec
+
+# Documentation builds
+docs/_build/
+docs/build/
+site/
+
+# Local configuration
+.env.local
+.env.*.local
+config.local.*
