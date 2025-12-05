@@ -93,8 +93,12 @@ class GGUFLM(LM):
                     and "token_logprobs" in logprobs
                     and logprobs["token_logprobs"]
                 ):
-                    logprob, is_greedy = get_result(logprobs, len(context))
-                    res.append((logprob, is_greedy))
+                    try:
+                        logprob, is_greedy = get_result(logprobs, len(context))
+                        res.append((logprob, is_greedy))
+                    except Exception as e:
+                        logger.error(f"Error processing logprobs: {e}, resp={response}")
+                        res.append((None, False))
                 else:
                     logger.warning(
                         "Invalid logprobs data. Expected 'logprobs' to contain 'token_logprobs' list."
