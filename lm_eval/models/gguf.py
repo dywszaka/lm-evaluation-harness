@@ -98,7 +98,7 @@ class GGUFLM(LM):
                         res.append((logprob, is_greedy))
                     except Exception as e:
                         logger.error(f"Error processing logprobs: {e}, resp={response}")
-                        res.append((None, False))
+                        res.append((0, False))
                 else:
                     logger.warning(
                         "Invalid logprobs data. Expected 'logprobs' to contain 'token_logprobs' list."
